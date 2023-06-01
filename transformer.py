@@ -1,3 +1,5 @@
+
+
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -23,7 +25,7 @@ class SelfAttention(nn.Module):
         self.values = nn.Linear(self.head_dim, self.head_dim, bias=False)
         self.keys = nn.Linear(self.head_dim, self.head_dim, bias=False)
         self.queries = nn.Linear(self.head_dim, self.head_dim, bias=False)
-        self.fc_out = nn.Linear(embed_size, embed_size, bias=False)
+        self.fc_out = nn.Linear(heads*self.head_dim, embed_size, bias=False)
 
     def forward(self, value, key, query, mask):
         # key -> source scentence
@@ -39,6 +41,9 @@ class SelfAttention(nn.Module):
         queries = self.queries(queries)
 
         energy = torch.einsum("nqhd,nkhd->nhqk", [queries, keys])
+        # queries shape: (N, query_len, num_heads, heads_dim)
+        # keys shape: (N, key_len, heads, heads_dim)
+        # energy shape: (N, heads, query_len, key_len)
 
         if mask is not None:
             energy = energy.masked_fill(mask == 0, float("-1e20"))
@@ -173,7 +178,7 @@ class Transformer(nn.Module):
 
 
 if __name__ == '__main__':
-    
+
     # Check if a GPU is available
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -182,7 +187,7 @@ if __name__ == '__main__':
     learning_rate = 0.001
     src_vocab_size = 10
     trg_vocab_size = 10
-    embed_size = 512
+    embed_size = 64
     num_heads = 8
     num_layers = 6
     dropout = 0.1
@@ -195,14 +200,14 @@ if __name__ == '__main__':
     trg_seq2 = [i for i in range(12, 22)]
 
     # Convert the sequences to PyTorch tensors and move them to the GPU
-    src = torch.LongTensor([src_seq1, src_seq2]).to(device)
-    trg = torch.LongTensor([trg_seq1, trg_seq2])
+    src = torch.tensor([src_seq1, src_seq2])
+    trg = torch.tensor([trg_seq1, trg_seq2])
 
     # Initialize the Transformer model and move it to the GPU
     model = Transformer(src_vocab_size, trg_vocab_size, src_pad_idx=0, trg_pad_idx=0,
                         embed_size=embed_size, num_layers=num_layers,
                         num_heads=num_heads, dropout=dropout,
-                        max_length=max_length).to(device)
+                        max_length=max_length)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -211,7 +216,7 @@ if __name__ == '__main__':
     # Train the model for the specified number of epochs
     for epoch in range(num_epochs):
         # Forward pass
-        out = model(src, trg[:, :-1].to(device))
+        out = model(src, trg[:, :-1])
         out = out.reshape(-1, out.shape[2])
         trg_y = trg[:, 1:].reshape(-1)
 
