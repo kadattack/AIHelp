@@ -1,10 +1,8 @@
-
-
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import numpy
-import torch.nn as nn
+
 from torch.nn import Linear
 
 import seaborn as sns
@@ -78,23 +76,23 @@ class TransformerBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, src_vocab_size, embed_size, num_layers, heads, device, forward_expansion, dropout, max_lengeth):
+    def __init__(self, src_vocab_size, embed_size, num_layers, heads, device, forward_expansion, dropout, max_length):
         super(Encoder, self).__init__()
         self.embed_size = embed_size
         self.device = device
         self.word_embedding = nn.Embedding(src_vocab_size, embed_size)
-        self.position_embedding = nn.Embedding(max_lengeth, embed_size)
+        self.position_embedding = nn.Embedding(max_length, embed_size)
 
         self.layers = nn.ModuleList(
             [TransformerBlock(embed_size, heads, dropout, forward_expansion) for _ in range(num_layers) ]
         )
         self.droppout = nn.Dropout(dropout)
 
-    def forward(self, x, mask):
-        N, seq_length = x.shape
+    def forward(self, src, mask):
+        N, seq_length = src.shape
         positions = torch.arange(0, seq_length).expand(N, seq_length).to(self.device) # matrix
         
-        out = self.droppout(self.word_embedding(x) + self.position_embedding(positions))
+        out = self.droppout(self.word_embedding(src) + self.position_embedding(positions))
 
         for layer in self.layers:
             out = layer(out, out, out, mask)
@@ -117,11 +115,11 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, trg_vocab_size, embed_size, num_layers, heads, forward_expansion, dropout, device, max_lengeth):
+    def __init__(self, trg_vocab_size, embed_size, num_layers, heads, forward_expansion, dropout, device, max_length):
         super(Decoder, self).__init__()
         self.device = device
         self.word_embedding = nn.Embedding(trg_vocab_size, embed_size)
-        self.position_embedding = nn.Embedding(max_lengeth, embed_size)
+        self.position_embedding = nn.Embedding(max_length, embed_size)
         
         self.layers = nn.ModuleList(
             [DecoderBlock(embed_size, heads, forward_expansion, dropout, device) for _ in range(num_layers)]
@@ -143,11 +141,11 @@ class Decoder(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, src_vocab_size, trg_vocab_size, src_pad_idx, trg_pad_idx, embed_size=256, num_layers=6, forward_expansion=4, heads=8, dropout=0, device="cuda", max_lengeth=100):
+    def __init__(self, src_vocab_size, trg_vocab_size, src_pad_idx, trg_pad_idx, embed_size=256, num_layers=6, forward_expansion=4, num_heads=8, dropout=0.0, device="cuda", max_length=100):
         super(Transformer, self).__init__()
 
-        self.encoder = Encoder(src_vocab_size, embed_size, num_layers, heads, device, forward_expansion, dropout, max_lengeth)
-        self.decoder = Decoder(trg_vocab_size, embed_size, num_layers, heads, forward_expansion, dropout, device, max_lengeth)
+        self.encoder = Encoder(src_vocab_size, embed_size, num_layers, num_heads, device, forward_expansion, dropout, max_length)
+        self.decoder = Decoder(trg_vocab_size, embed_size, num_layers, num_heads, forward_expansion, dropout, device, max_length)
 
         self.src_pad_idx = src_pad_idx
         self.trg_pad_idx = trg_pad_idx
@@ -175,19 +173,55 @@ class Transformer(nn.Module):
 
 
 if __name__ == '__main__':
-    device = torch.device("cuda" if torch.cuda.is_available() else 'cpu')
-    print(device)
+    
+    # Check if a GPU is available
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    x = torch.tensor([[1,5,6,4,3,9,5,2,0],[1,8,7,3,4,5,6,7,2]]).to(device)
-    trg = torch.tensor([[1,7,4,3,5,9,2,0],[1,5,6,2,4,7,6,2]]).to(device)
-
-    src_pad_idx = 0
-    trg_pad_idx = 0
+    # Define the model hyperparameters
+    num_epochs = 10
+    learning_rate = 0.001
     src_vocab_size = 10
     trg_vocab_size = 10
-    model = Transformer(src_vocab_size, trg_vocab_size, src_pad_idx, trg_pad_idx).to(device)
+    embed_size = 512
+    num_heads = 8
+    num_layers = 6
+    dropout = 0.1
+    max_length = 10
 
-    out = model(x, trg[:, :-1])
-    print(out)
+    # Create the source and target sequences
+    src_seq1 = [i for i in range(1, 11)]
+    src_seq2 = [i for i in range(2, 12)]
+    trg_seq1 = [i for i in range(11, 21)]
+    trg_seq2 = [i for i in range(12, 22)]
 
+    # Convert the sequences to PyTorch tensors and move them to the GPU
+    src = torch.LongTensor([src_seq1, src_seq2]).to(device)
+    trg = torch.LongTensor([trg_seq1, trg_seq2])
 
+    # Initialize the Transformer model and move it to the GPU
+    model = Transformer(src_vocab_size, trg_vocab_size, src_pad_idx=0, trg_pad_idx=0,
+                        embed_size=embed_size, num_layers=num_layers,
+                        num_heads=num_heads, dropout=dropout,
+                        max_length=max_length).to(device)
+
+    # Define the loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Train the model for the specified number of epochs
+    for epoch in range(num_epochs):
+        # Forward pass
+        out = model(src, trg[:, :-1].to(device))
+        out = out.reshape(-1, out.shape[2])
+        trg_y = trg[:, 1:].reshape(-1)
+
+        # Compute the loss
+        loss = criterion(out, trg_y)
+
+        # Backward pass and optimization
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # Print the loss for this epoch
+        print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
